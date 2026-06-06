@@ -285,7 +285,7 @@ const definition = {
             // 通道2专用数据点
             [7, 'state_l2', tuya.valueConverter.onOff],
             [30, 'relay_status_l2', valueConverterLocal.relayStatus],
-            [8, 'brightness_l2', valueConverterLocal.brightness],
+            [8, 'brightness_l2', valueConverterLocal.brightnessRaw],
 
             // 通道3专用数据点
             [3, 'state_l3_alt', tuya.valueConverter.onOff],
