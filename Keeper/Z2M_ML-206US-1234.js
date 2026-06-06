@@ -6,11 +6,11 @@ const tuya = require('zigbee-herdsman-converters/lib/tuya');
 const e = exposes.presets;
 const ea = exposes.access;
 
-const { TextEncoder, TextDecoder } = require('util');
+const DEFAULT_CHANNEL_COUNT = 3;
 
 // 获取通道数（基于制造商名称）
 const getChannelCount = (device) => {
-    if (!device?.manufacturerName) return 1;
+    if (!device?.manufacturerName) return DEFAULT_CHANNEL_COUNT;
     
     const manufacturerName = device.manufacturerName.toLowerCase();
     
@@ -18,8 +18,9 @@ const getChannelCount = (device) => {
     if (manufacturerName.includes('dmckrsxg')) return 2; // 二路设备
     if (manufacturerName.includes('lnyz4a6v')) return 1; // 一路设备
     if (manufacturerName.includes('y4jqpry8')) return 4; // 四路设备
+    if (manufacturerName.includes('sa2ueffe')) return 3; // tres canales   
     
-    return 1;
+    return DEFAULT_CHANNEL_COUNT;
 };
 
 // 端点映射（所有通道到物理端点1）
@@ -36,7 +37,6 @@ const createEndpointMap = (channels) => {
 const createExposes = (device) => {
     const channels = getChannelCount(device);
     const exposesList = [
-        tuya.exposes.backlightModeOffOn().withAccess(ea.STATE_SET),
         e.numeric('backlight_brightness', ea.STATE_SET)
             .withDescription('背光亮度')
             .withUnit('%')
@@ -48,18 +48,13 @@ const createExposes = (device) => {
             .withDescription('开启时的指示灯颜色'),
         e.enum('switch_color_off', ea.STATE_SET, ['red', 'blue', 'green', 'white', 'yellow', 'magenta', 'cyan', 'warm_white', 'warm_yellow'])
             .withDescription('关闭时的指示灯颜色'),
-        e.enum('indicator_status', ea.STATE_SET, ['off', 'on_off_status', 'switch_position'])
-            .withDescription('指示灯模式'),
     ];
     
     // 为每个通道添加特定控制项
     for (let i = 1; i <= channels; i++) {
         const endpoint = `l${i}`;
         exposesList.push(
-            e.switch().withEndpoint(endpoint),
-            e.text('name', ea.STATE_SET)
-                .withDescription(`开关${i}名称`)
-                .withEndpoint(endpoint),
+            e.light_brightness().withEndpoint(endpoint),
             e.enum(`relay_status_${endpoint}`, ea.STATE_SET, ['power_on', 'power_off', 'restart_memory'])
                 .withDescription(`开关${i}继电器状态`)
                 .withEndpoint(endpoint)
@@ -70,17 +65,27 @@ const createExposes = (device) => {
 };
 
 // 数据转换器
+const ignoreInvalidTuyaEnum = (converter) => ({
+    to: converter.to,
+    from: (v, meta) => {
+        if (v === true || v === false || v === null || v === undefined) {
+            return undefined;
+        }
+        return converter.from(v, meta);
+    },
+});
+
 const valueConverterLocal = {
-    indicatorStatus: tuya.valueConverterBasic.lookup({
+    indicatorStatus: ignoreInvalidTuyaEnum(tuya.valueConverterBasic.lookup({
         off: tuya.enum(0),
         on_off_status: tuya.enum(1),
         switch_position: tuya.enum(2),
-    }),
-    relayStatus: tuya.valueConverterBasic.lookup({
+    })),
+    relayStatus: ignoreInvalidTuyaEnum(tuya.valueConverterBasic.lookup({
         power_off: tuya.enum(0),
         power_on: tuya.enum(1),
         restart_memory: tuya.enum(2),
-    }),
+    })),
     switchColor: tuya.valueConverterBasic.lookup({
         red: tuya.enum(0),
         blue: tuya.enum(1),
@@ -92,23 +97,6 @@ const valueConverterLocal = {
         warm_white: tuya.enum(7),
         warm_yellow: tuya.enum(8),
     }),
-    name: {
-        to: (v, meta) => {
-            const stringValue = String(v ?? '');
-            const encoder = new TextEncoder();
-            const encoded = encoder.encode(stringValue);
-            const limitedBytes = encoded.slice(0, 50);
-            return Array.from(limitedBytes);
-        },
-        from: (v, meta) => {
-            if (!Array.isArray(v)) {
-                return String(v);
-            }
-            const decoder = new TextDecoder('utf-8');
-            const uint8Array = new Uint8Array(v);
-            return decoder.decode(uint8Array);
-        },
-    },
     cycleSchedule: {
         to: (v, meta) => {
             const stringValue = String(v ?? '');
@@ -119,6 +107,96 @@ const valueConverterLocal = {
             return Array.isArray(v) 
                 ? v.map(String.fromCharCode).join('')
                 : String(v);
+        },
+    },
+    percent: {
+        to: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                throw new Error(`Invalid percent value: ${v}`);
+            }
+            return Math.max(0, Math.min(100, Math.round(value)));
+        },
+        from: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                return undefined;
+            }
+            return Math.max(0, Math.min(100, Math.round(value)));
+        },
+    },
+    brightness: {
+        to: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                throw new Error(`Invalid brightness value: ${v}`);
+            }
+            const clamped = Math.max(0, Math.min(254, Math.round(value)));
+            return Math.round((clamped / 254) * 1000);
+        },
+        from: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                return undefined;
+            }
+            const clamped = Math.max(0, Math.min(1000, Math.round(value)));
+            return Math.round((clamped / 1000) * 254);
+        },
+    },
+    brightnessRaw: {
+        to: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                throw new Error(`Invalid brightness value: ${v}`);
+            }
+            return Math.max(0, Math.min(254, Math.round(value)));
+        },
+        from: (v, meta) => {
+            const value = Number(v);
+            if (Number.isNaN(value)) {
+                return undefined;
+            }
+            return Math.max(0, Math.min(254, Math.round(value)));
+        },
+    },
+};
+
+const fzLocal = {
+    datapointLogger: {
+        cluster: 'manuSpecificTuya',
+        type: ['commandDataReport', 'commandDataResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const dpValues = msg.data?.dpValues || [];
+            const payload = dpValues.map((dpValue) => {
+                const raw = dpValue.data;
+                const data = Array.isArray(raw) ? raw :
+                    Buffer.isBuffer(raw) ? Array.from(raw) :
+                    Array.isArray(raw?.data) ? raw.data :
+                    Buffer.isBuffer(raw?.data) ? Array.from(raw.data) : [];
+                const value = data.reduce((acc, byte) => (acc << 8) + byte, 0);
+
+                return {
+                    dp: dpValue.dp,
+                    datatype: dpValue.datatype,
+                    data,
+                    value,
+                };
+            });
+            if (payload.length > 0) {
+                meta.logger.info(`ZM21 ZMS-206US datapoints: ${JSON.stringify(payload)}`);
+            }
+            return {};
+        },
+    },
+};
+
+const tzLocal = {
+    brightnessL1: {
+        key: ['brightness_l1'],
+        convertSet: async (entity, key, value, meta) => {
+            const brightness = valueConverterLocal.brightness.to(value, meta);
+            await tuya.sendDataPointValue(entity, 5, brightness);
+            return {state: {brightness_l1: value}};
         },
     },
 };
@@ -138,8 +216,8 @@ const definition = {
     vendor: 'ZM21',
     description: '友程DIY智能开关（支持1-4路）',
     
-    fromZigbee: [tuya.fz.datapoints],
-    toZigbee: [tuya.tz.datapoints],
+    fromZigbee: [fzLocal.datapointLogger, tuya.fz.datapoints],
+    toZigbee: [tzLocal.brightnessL1, tuya.tz.datapoints],
     onEvent: tuya.onEventSetTime,
     
     configure: async (device, coordinatorEndpoint) => {
@@ -151,8 +229,6 @@ const definition = {
             }
             
             await tuya.configureMagicPacket(device, coordinatorEndpoint, {endpoint});
-            await reporting.bind(endpoint, coordinatorEndpoint, ['genOnOff']);
-            await reporting.onOff(endpoint);
         } catch (error) {
             console.error('设备配置错误:', error);
         }
@@ -164,7 +240,7 @@ const definition = {
             return createEndpointMap(channels);
         } catch (error) {
             console.error('端点映射错误:', error);
-            return { l1: 1 };
+            return createEndpointMap(DEFAULT_CHANNEL_COUNT);
         }
     },
     
@@ -173,20 +249,20 @@ const definition = {
             return createExposes(device);
         } catch (error) {
             console.error('暴露项创建错误:', error);
-            return [e.switch().withEndpoint('l1')];
+            return createExposes({manufacturerName: ''});
         }
     },
     
     meta: {
         multiEndpoint: true,
-        multiEndpointSkip: ['backlight_mode', 'child_lock', 'backlight_brightness', 
-                           'switch_color_on', 'switch_color_off', 'indicator_status'],
+        multiEndpointSkip: ['child_lock', 'backlight_brightness',
+                           'switch_color_on', 'switch_color_off'],
         tuyaDatapoints: [
             // 公共数据点
             [13, "state", tuya.valueConverter.onOff],
             [14, 'relay_status', tuya.valueConverter.raw],
-            [15, 'indicator_status', valueConverterLocal.indicatorStatus],
-            [16, 'backlight_mode', tuya.valueConverter.onOff],
+            [15, 'state_l3', tuya.valueConverter.onOff],
+            [16, 'brightness_l3', valueConverterLocal.brightness],
             [24, 'test_bit', tuya.valueConverter.raw],
             [101, 'child_lock', tuya.valueConverter.lockUnlock],
             [102, 'backlight_brightness', tuya.valueConverter.raw],
@@ -197,26 +273,23 @@ const definition = {
             // 通道1专用数据点
             [1, 'state_l1', tuya.valueConverter.onOff],
             [29, 'relay_status_l1', valueConverterLocal.relayStatus],
-            [7, 'countdown_l1', tuya.valueConverter.raw],
-            [105, 'name_l1', valueConverterLocal.name],
+            [2, 'brightness_l1', valueConverterLocal.brightnessRaw],
+            [7, 'state_l2', tuya.valueConverter.onOff],
             
             // 通道2专用数据点
-            [2, 'state_l2', tuya.valueConverter.onOff],
             [30, 'relay_status_l2', valueConverterLocal.relayStatus],
-            [8, 'countdown_l2', tuya.valueConverter.raw],
-            [106, 'name_l2', valueConverterLocal.name],
+            [8, 'brightness_l2', valueConverterLocal.brightness],
             
             // 通道3专用数据点
-            [3, 'state_l3', tuya.valueConverter.onOff],
+            [3, 'state_l3_alt', tuya.valueConverter.onOff],
             [31, 'relay_status_l3', valueConverterLocal.relayStatus],
             [9, 'countdown_l3', tuya.valueConverter.raw],
-            [107, 'name_l3', valueConverterLocal.name],
             
             // 通道4专用数据点
             [4, 'state_l4', tuya.valueConverter.onOff],
             [32, 'relay_status_l4', valueConverterLocal.relayStatus],
+            [12, 'brightness_l4', valueConverterLocal.percent],
             [10, 'countdown_l4', tuya.valueConverter.raw],
-            [108, 'name_l4', valueConverterLocal.name],
         ]
     }
 };
