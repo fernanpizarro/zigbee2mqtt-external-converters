@@ -274,12 +274,12 @@ const definition = {
             [1, 'state_l1', tuya.valueConverter.onOff],
             [29, 'relay_status_l1', valueConverterLocal.relayStatus],
             [2, 'brightness_l1', valueConverterLocal.brightnessRaw],
-            [7, 'state_l2', tuya.valueConverter.onOff],
-            
+
             // 通道2专用数据点
+            [7, 'state_l2', tuya.valueConverter.onOff],
             [30, 'relay_status_l2', valueConverterLocal.relayStatus],
             [8, 'brightness_l2', valueConverterLocal.brightness],
-            
+
             // 通道3专用数据点
             [3, 'state_l3_alt', tuya.valueConverter.onOff],
             [31, 'relay_status_l3', valueConverterLocal.relayStatus],
