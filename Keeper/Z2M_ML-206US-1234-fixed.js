@@ -199,6 +199,13 @@ const tzLocal = {
             return {state: {brightness_l1: value}};
         },
     },
+    datapointLogger: {
+        key: ['brightness_l2', 'brightness_l3', 'brightness_l4'],
+        convertSet: async (entity, key, value, meta) => {
+            meta.logger.info(`ZM21 SET ${key} = ${value} (raw)`);
+            return undefined;
+        },
+    },
 };
 
 // 设备定义
@@ -217,7 +224,7 @@ const definition = {
     description: '友程DIY智能开关（支持1-4路）',
     
     fromZigbee: [fzLocal.datapointLogger, tuya.fz.datapoints],
-    toZigbee: [tzLocal.brightnessL1, tuya.tz.datapoints],
+    toZigbee: [tzLocal.brightnessL1, tzLocal.datapointLogger, tuya.tz.datapoints],
     onEvent: tuya.onEventSetTime,
     
     configure: async (device, coordinatorEndpoint) => {
