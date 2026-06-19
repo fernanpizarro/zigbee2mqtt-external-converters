@@ -1,22 +1,16 @@
-// Keeper ML-206US 3-gang Tuya dimmer (TS0601 / _TZE204_odxhnome)
+// Keeper external converters (TS0601 Tuya):
+//   1) ML-206US        - dimmer 3 canales con backlight RGB  (_TZE204_odxhnome)
+//   2) Roller shutter  - cortina 1 gang con backlight RGB    (_TZE284_19jwhi8c)
 //
-// Basado en el TS0601_dimmer_3 upstream (zigbee-herdsman-converters), con los
-// datapoints especificos de Keeper verificados empiricamente (2026-06-11):
-//   dp1/dp2   state/brightness canal 1
-//   dp7/dp8   state/brightness canal 2
-//   dp15/dp16 state/brightness canal 3
-//   dp21      backlight mode (0=off, 1=normal, 2=inverted)
-//   dp101     color del LED con tecla encendida (enum 0-8)
-//   dp102     color del LED con tecla apagada (enum 0-8, global a las 3 teclas)
-// dp103/dp104 (colores segun el converter del fabricante para la familia de
-// switches) resultaron inertes en este dimmer, y no existe DP de brillo
-// numerico del backlight (probados 22, 23, 25, 26, 27, 104, 105, 106, 107).
+// DPs verificados empíricamente con el equipo físico (jun 2026). Ver detalle
+// de cada mapa en los comentarios de cada definición.
 
 const exposes = require('zigbee-herdsman-converters/lib/exposes');
 const tuya = require('zigbee-herdsman-converters/lib/tuya');
 const e = exposes.presets;
 const ea = exposes.access;
 
+// Paleta de color de los LEDs de las teclas, compartida por ambos equipos.
 const switchColorLookup = {
     red: tuya.enum(0),
     blue: tuya.enum(1),
@@ -29,7 +23,14 @@ const switchColorLookup = {
     warm_yellow: tuya.enum(8),
 };
 
-const definition = {
+// ---------------------------------------------------------------------------
+// Dimmer 3 canales (_TZE204_odxhnome)
+//   dp1/2, dp7/8, dp15/16 = state/brightness canales 1-3 (escala 0-1000)
+//   dp3/5, 9/11, 17/19 = min/max brillo; dp4/10/18 light_type; dp6/12/20 countdown
+//   dp14 power_on_behavior; dp21 backlight mode
+//   dp101 color tecla ON; dp102 color tecla OFF (global)
+// ---------------------------------------------------------------------------
+const dimmer = {
     fingerprint: tuya.fingerprint('TS0601', ['_TZE204_odxhnome']),
     model: 'ML-206US',
     vendor: 'Keeper',
@@ -84,4 +85,46 @@ const definition = {
     },
 };
 
-module.exports = definition;
+// ---------------------------------------------------------------------------
+// Roller shutter 1 cortina, 3 botones (_TZE284_19jwhi8c)
+//   dp1 control (0=abrir,1=stop,2=cerrar); dp2/3 posición 0-100 (100=abierta)
+//   dp8 motor_reversal (0=normal,1=invertido); dp10 tiempo de calibración (s)
+//   dp13 color tecla ON; dp103 color tecla OFF; dp14 backlight mode; dp102 brillo backlight
+//   Sin mapear: dp7, dp101 (toggles), dp77 (estado read-only)
+// ---------------------------------------------------------------------------
+const roller = {
+    fingerprint: tuya.fingerprint('TS0601', ['_TZE284_19jwhi8c']),
+    model: 'KEEPER-ROLLER',
+    vendor: 'Keeper',
+    description: 'Roller shutter switch with RGB key backlight',
+    extend: [tuya.modernExtend.tuyaBase({dp: true})],
+    options: [exposes.options.invert_cover()],
+    exposes: [
+        e.cover_position().setAccess('position', ea.STATE_SET),
+        e.binary('motor_reversal', ea.STATE_SET, 'ON', 'OFF').withDescription('Invierte el sentido del motor'),
+        e.numeric('calibration_time', ea.STATE_SET).withUnit('s').withValueMin(0).withValueMax(120)
+            .withDescription('Tiempo de recorrido completo de la cortina'),
+        tuya.exposes.backlightModeOffNormalInverted().withAccess(ea.STATE_SET),
+        e.numeric('backlight_brightness', ea.STATE_SET).withUnit('%').withValueMin(1).withValueMax(100)
+            .withDescription('Brillo de los LEDs de los botones'),
+        e.enum('switch_color_on', ea.STATE_SET, Object.keys(switchColorLookup))
+            .withDescription('Color del LED del botón mientras está activado'),
+        e.enum('switch_color_off', ea.STATE_SET, Object.keys(switchColorLookup))
+            .withDescription('Color del LED del botón mientras está desactivado'),
+    ],
+    meta: {
+        tuyaDatapoints: [
+            [1, 'state', tuya.valueConverterBasic.lookup({OPEN: tuya.enum(0), STOP: tuya.enum(1), CLOSE: tuya.enum(2)})],
+            [2, 'position', tuya.valueConverter.coverPosition],
+            [3, 'position', tuya.valueConverter.coverPosition],
+            [8, 'motor_reversal', tuya.valueConverterBasic.lookup({OFF: tuya.enum(0), ON: tuya.enum(1)})],
+            [10, 'calibration_time', tuya.valueConverter.raw],
+            [14, 'backlight_mode', tuya.valueConverter.backlightModeOffNormalInverted],
+            [102, 'backlight_brightness', tuya.valueConverter.raw],
+            [13, 'switch_color_on', tuya.valueConverterBasic.lookup(switchColorLookup)],
+            [103, 'switch_color_off', tuya.valueConverterBasic.lookup(switchColorLookup)],
+        ],
+    },
+};
+
+module.exports = [dimmer, roller];
